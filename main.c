@@ -8,10 +8,10 @@
 #include <pthread.h>
 #include <stdarg.h>
 
-#define PORT 8080
-#define CLIENT_PORT 7777
+#define PORT 80
+#define CLIENT_PORT 80
 
-#define SHOLD_LOG 1
+#define SHOULD_LOG 1
 #define SERVERS_SIDE_IP
 enum _JobType{
     Video=0, Music=1, Picture=2
@@ -27,7 +27,7 @@ struct server{
 };
 
 void log(const char *fmt, ...) {
-    if (SHOLD_LOG){
+    if (SHOULD_LOG){
         va_list args;
         va_start(args, fmt);
         vprintf(fmt, args);
@@ -53,7 +53,7 @@ int create_server_socket(char* ip_addr){
         exit(EXIT_FAILURE); 
     } 
     address.sin_family = AF_INET; 
-    address.sin_addr.s_addr = inet_addr("192.168.14.148");
+    address.sin_addr.s_addr = inet_addr(ip_addr);
     address.sin_port = htons( CLIENT_PORT ); 
     // Forcefully attaching socket to the port 8080 
     if (bind(server_fd, (struct sockaddr *)&address,  
@@ -88,7 +88,7 @@ int create_client_socket(){
         exit(EXIT_FAILURE); 
     } 
     address.sin_family = AF_INET; 
-    address.sin_addr.s_addr = inet_addr("192.168.14.148");; 
+    address.sin_addr.s_addr = inet_addr("10.0.0.1");; 
     address.sin_port = htons( PORT ); 
        
     // Forcefully attaching socket to the port 8080 
@@ -136,7 +136,6 @@ int extract_load(char* message){
 }
 
 int select_server(Server * servers, JobType job_type, int current_load){
-    int min_load = -1;
     int selected_server_index = -1;
     int first_server = rand() % 10;
     int second_server = rand() % 9;
@@ -156,7 +155,9 @@ int select_server(Server * servers, JobType job_type, int current_load){
 
         int selected_index = (future_load_server_one < future_load_server_two) ?
                             first_server: second_server;
-        servers[selected_index].load = min(future_load_server_one, future_load_server_two);
+        int min_load_value = (future_load_server_one < future_load_server_two) ?
+                            future_load_server_one: future_load_server_two;
+        servers[selected_index].load = min_load_value;
     pthread_mutex_unlock(&(servers[second_server].lock));
     pthread_mutex_unlock(&(servers[first_server].lock));
     return selected_index;
@@ -214,18 +215,21 @@ void handle_connection(char * client_message, int client_fd, Server* server){
     pthread_create( &thread, NULL, _handle_connection, (void*) payload);
 }
 
+void test(){
+
+
+}
 int main(){
     Server* servers = malloc(sizeof(Server) * 10);
     for (int i=0; i<10; i++){
         char ip[80];
-        sprintf(ip, "192.168.0.10%d",i);
+        sprintf(ip, "192.168.0.10%d/24",i);
         JobType job_type = (i<6) ? Video : Music;
         servers[i].server_fd = create_server_socket(ip);
         servers[i].job_type = job_type;
         servers[i].load = 0;
         pthread_mutex_init(&servers[i].lock, NULL);
     }
-
     struct sockaddr_in my_addr, peer_addr, peer_addr_size;
     int clients_fd = create_client_socket();
     while(1){
@@ -237,13 +241,15 @@ int main(){
             char * client_message = (char*) malloc(sizeof(char)* 10);
             for (int i = 0 ;i <10; i++){ client_message[i] = 0;}
             int read_size;
-            int current_index = 0;
-            while( (read_size = recv(acc , client_message + current_index , 10 , 0)) > 0 ){
+            ssize_t data_received = 0;
+            ssize_t data_on_socket_length = read_size = recv(acc , NULL , 0 , MSG_PEEK | MSG_TRUNC);
+            while(data_received < data_on_socket_length){
+                ssize_t current_data_received = recv(acc, client_message + data_received,data_on_socket_length-data_received, 0);
                 //Send the message back to client
-                log(client_message + current_index);
-                current_index += read_size;
+                log(client_message + data_received);
+                data_received += current_data_received;
             }
-            
+            printf("%d ", read_size);
             JobType job_type = extract_job_type(client_message);
             int load =  extract_load(client_message);
             log("Job type %d, load %d \n", job_type, load);
